@@ -1,0 +1,213 @@
+import React, { useState } from 'react';
+import { Upload, Wand2, X, Loader2 } from 'lucide-react';
+
+export default function ImageGenerator() {
+  const [images, setImages] = useState([]);
+  const [generatedImage, setGeneratedImage] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [prompt, setPrompt] = useState('');
+
+  const handleFileUpload = (e) => {
+    const files = Array.from(e.target.files);
+    
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setImages(prev => [...prev, {
+          id: Date.now() + Math.random(),
+          data: event.target.result,
+          name: file.name
+        }]);
+      };
+      reader.readAsDataURL(file);
+    });
+    
+    // reset input so same file can be selected again
+    e.target.value = '';
+  };
+
+  const triggerFileInput = () => {
+    const input = document.getElementById('fileInput');
+    if (input) {
+      input.click();
+    }
+  };
+
+  const removeImage = (id) => {
+    setImages(prev => prev.filter(img => img.id !== id));
+  };
+
+  const generateArtwork = async () => {
+    if (images.length === 0) {
+      alert('please add at least one image');
+      return;
+    }
+
+    setLoading(true);
+    setGeneratedImage(null);
+
+    try {
+      const imageContents = images.map(img => ({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: img.data.split(';')[0].split(':')[1],
+          data: img.data.split(',')[1]
+        }
+      }));
+
+      const userPrompt = prompt.trim() || 
+        'create an original artistic composition that creatively blends and merges all these images together. be imaginative and create something visually striking that combines elements from each image in a cohesive way.';
+
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1024,
+          messages: [{
+            role: "user",
+            content: [
+              ...imageContents,
+              {
+                type: "text",
+                text: userPrompt + '\n\nrespond with only a detailed image generation prompt that describes the artwork to create. be specific about composition, style, colors, and how elements blend together. do not include anything except the prompt itself.'
+              }
+            ]
+          }]
+        })
+      });
+
+      const data = await response.json();
+      const artPrompt = data.content[0].text;
+
+      // generate the actual image
+      const imageResponse = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1024,
+          messages: [{
+            role: "user",
+            content: `generate an image: ${artPrompt}`
+          }]
+        })
+      });
+
+      const imageData = await imageResponse.json();
+      
+      if (imageData.content && imageData.content[0]?.type === 'image') {
+        setGeneratedImage(`data:${imageData.content[0].source.media_type};base64,${imageData.content[0].source.data}`);
+      }
+    } catch (error) {
+      console.error('error generating:', error);
+      alert('failed to generate artwork. please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-blue-900 to-indigo-900 p-8">
+      <div className="max-w-6xl mx-auto">
+        <h1 className="text-4xl font-bold text-white mb-2 text-center">ai image blender</h1>
+        <p className="text-blue-200 text-center mb-8">upload multiple images and generate unique artwork</p>
+
+        <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6">
+          <button
+            type="button"
+            onClick={triggerFileInput}
+            className="w-full flex flex-col items-center justify-center border-2 border-dashed border-white/30 rounded-xl p-8 cursor-pointer hover:border-white/60 transition-colors active:bg-white/5"
+          >
+            <Upload className="w-12 h-12 text-white mb-3" />
+            <span className="text-white text-lg mb-2">click to upload images</span>
+            <span className="text-blue-200 text-sm">supports jpg, png, webp</span>
+          </button>
+          <input
+            id="fileInput"
+            type="file"
+            multiple
+            accept="image/*"
+            onChange={handleFileUpload}
+            style={{ position: 'absolute', left: '-9999px' }}
+          />
+
+          {images.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-white font-semibold mb-3">uploaded images ({images.length})</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {images.map(img => (
+                  <div key={img.id} className="relative group">
+                    <img 
+                      src={img.data} 
+                      alt={img.name}
+                      className="w-full h-32 object-cover rounded-lg"
+                    />
+                    <button
+                      onClick={() => removeImage(img.id)}
+                      className="absolute top-2 right-2 bg-red-500 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-4 h-4 text-white" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-6">
+            <label className="text-white text-sm mb-2 block">style instructions (optional)</label>
+            <input
+              type="text"
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="e.g., surreal digital art, vibrant colors, dreamlike atmosphere"
+              className="w-full bg-white/10 text-white placeholder-blue-200 rounded-lg px-4 py-3 border border-white/20 focus:outline-none focus:border-white/40"
+            />
+          </div>
+
+          <button
+            onClick={generateArtwork}
+            disabled={loading || images.length === 0}
+            className="w-full mt-6 bg-gradient-to-r from-pink-500 to-purple-500 text-white font-semibold py-4 rounded-xl hover:from-pink-600 hover:to-purple-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="w-5 h-5 animate-spin" />
+                generating artwork...
+              </>
+            ) : (
+              <>
+                <Wand2 className="w-5 h-5" />
+                generate artwork
+              </>
+            )}
+          </button>
+        </div>
+
+        {generatedImage && (
+          <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6">
+            <h3 className="text-white font-semibold mb-4 text-xl">generated artwork</h3>
+            <img 
+              src={generatedImage} 
+              alt="generated artwork"
+              className="w-full rounded-xl shadow-2xl"
+            />
+            <a
+              href={generatedImage}
+              download="generated-artwork.png"
+              className="mt-4 inline-block bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600 transition-colors"
+            >
+              download image
+            </a>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
